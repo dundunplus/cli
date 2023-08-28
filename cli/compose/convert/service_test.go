@@ -31,7 +31,7 @@ func TestConvertRestartPolicy(t *testing.T) {
 		},
 		{
 			input:    "unknown",
-			expError: "unknown restart policy: unknown",
+			expError: "invalid restart policy: unknown policy 'unknown'",
 		},
 		{
 			input: "always",
