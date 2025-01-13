@@ -74,6 +74,7 @@ func TestNodeInspectErrors(t *testing.T) {
 			assert.Check(t, cmd.Flags().Set(key, value))
 		}
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }
@@ -105,13 +106,15 @@ func TestNodeInspectPretty(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli := test.NewFakeCli(&fakeClient{
-			nodeInspectFunc: tc.nodeInspectFunc,
+		t.Run(tc.name, func(t *testing.T) {
+			cli := test.NewFakeCli(&fakeClient{
+				nodeInspectFunc: tc.nodeInspectFunc,
+			})
+			cmd := newInspectCommand(cli)
+			cmd.SetArgs([]string{"nodeID"})
+			assert.Check(t, cmd.Flags().Set("pretty", "true"))
+			assert.NilError(t, cmd.Execute())
+			golden.Assert(t, cli.OutBuffer().String(), fmt.Sprintf("node-inspect-pretty.%s.golden", tc.name))
 		})
-		cmd := newInspectCommand(cli)
-		cmd.SetArgs([]string{"nodeID"})
-		assert.Check(t, cmd.Flags().Set("pretty", "true"))
-		assert.NilError(t, cmd.Execute())
-		golden.Assert(t, cli.OutBuffer().String(), fmt.Sprintf("node-inspect-pretty.%s.golden", tc.name))
 	}
 }

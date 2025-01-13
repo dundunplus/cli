@@ -23,12 +23,12 @@ func TestSwarmJoinErrors(t *testing.T) {
 	}{
 		{
 			name:          "not-enough-args",
-			expectedError: "requires exactly 1 argument",
+			expectedError: "requires 1 argument",
 		},
 		{
 			name:          "too-many-args",
 			args:          []string{"remote1", "remote2"},
-			expectedError: "requires exactly 1 argument",
+			expectedError: "requires 1 argument",
 		},
 		{
 			name: "join-failed",
@@ -48,14 +48,17 @@ func TestSwarmJoinErrors(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cmd := newJoinCommand(
-			test.NewFakeCli(&fakeClient{
-				swarmJoinFunc: tc.swarmJoinFunc,
-				infoFunc:      tc.infoFunc,
-			}))
-		cmd.SetArgs(tc.args)
-		cmd.SetOut(io.Discard)
-		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newJoinCommand(
+				test.NewFakeCli(&fakeClient{
+					swarmJoinFunc: tc.swarmJoinFunc,
+					infoFunc:      tc.infoFunc,
+				}))
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
+		})
 	}
 }
 
@@ -89,12 +92,14 @@ func TestSwarmJoin(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli := test.NewFakeCli(&fakeClient{
-			infoFunc: tc.infoFunc,
+		t.Run(tc.name, func(t *testing.T) {
+			cli := test.NewFakeCli(&fakeClient{
+				infoFunc: tc.infoFunc,
+			})
+			cmd := newJoinCommand(cli)
+			cmd.SetArgs([]string{"remote"})
+			assert.NilError(t, cmd.Execute())
+			assert.Check(t, is.Equal(strings.TrimSpace(cli.OutBuffer().String()), tc.expected))
 		})
-		cmd := newJoinCommand(cli)
-		cmd.SetArgs([]string{"remote"})
-		assert.NilError(t, cmd.Execute())
-		assert.Check(t, is.Equal(strings.TrimSpace(cli.OutBuffer().String()), tc.expected))
 	}
 }

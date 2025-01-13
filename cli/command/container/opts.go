@@ -23,9 +23,22 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	cdi "tags.cncf.io/container-device-interface/pkg/parser"
+)
+
+const (
+	// TODO(thaJeztah): define these in the API-types, or query available defaults
+	//  from the daemon, or require "local" profiles to be an absolute path or
+	//  relative paths starting with "./". The daemon-config has consts for this
+	//  but we don't want to import that package:
+	//  https://github.com/moby/moby/blob/v23.0.0/daemon/config/config.go#L63-L67
+
+	// seccompProfileDefault is the built-in default seccomp profile.
+	seccompProfileDefault = "builtin"
+	// seccompProfileUnconfined is a special profile name for seccomp to use an
+	// "unconfined" seccomp profile.
+	seccompProfileUnconfined = "unconfined"
 )
 
 var deviceCgroupRuleRegexp = regexp.MustCompile(`^[acb] ([0-9]+|\*):([0-9]+|\*) [rwm]{1,3}$`)
@@ -194,7 +207,7 @@ func addFlags(flags *pflag.FlagSet) *containerOptions {
 	flags.Var(copts.ulimits, "ulimit", "Ulimit options")
 	flags.StringVarP(&copts.user, "user", "u", "", "Username or UID (format: <name|uid>[:<group|gid>])")
 	flags.StringVarP(&copts.workingDir, "workdir", "w", "", "Working directory inside the container")
-	flags.BoolVar(&copts.autoRemove, "rm", false, "Automatically remove the container when it exits")
+	flags.BoolVar(&copts.autoRemove, "rm", false, "Automatically remove the container and its associated anonymous volumes when it exits")
 
 	// Security
 	flags.Var(&copts.capAdd, "cap-add", "Add Linux capabilities")
@@ -350,10 +363,6 @@ func parse(flags *pflag.FlagSet, copts *containerOptions, serverOS string) (*con
 		return nil, errors.Errorf("invalid value: %d. Valid memory swappiness range is 0-100", swappiness)
 	}
 
-	mounts := copts.mounts.Value()
-	if len(mounts) > 0 && copts.volumeDriver != "" {
-		logrus.Warn("`--volume-driver` is ignored for volumes specified via `--mount`. Use `--mount type=volume,volume-driver=...` instead.")
-	}
 	var binds []string
 	volumes := copts.volumes.GetMap()
 	// add any bind targets to the list of container volumes
@@ -560,10 +569,10 @@ func parse(flags *pflag.FlagSet, copts *containerOptions, serverOS string) (*con
 			return nil, errors.Errorf("--health-retries cannot be negative")
 		}
 		if copts.healthStartPeriod < 0 {
-			return nil, fmt.Errorf("--health-start-period cannot be negative")
+			return nil, errors.New("--health-start-period cannot be negative")
 		}
 		if copts.healthStartInterval < 0 {
-			return nil, fmt.Errorf("--health-start-interval cannot be negative")
+			return nil, errors.New("--health-start-interval cannot be negative")
 		}
 
 		healthConfig = &container.HealthConfig{
@@ -683,14 +692,14 @@ func parse(flags *pflag.FlagSet, copts *containerOptions, serverOS string) (*con
 		Tmpfs:          tmpfs,
 		Sysctls:        copts.sysctls.GetAll(),
 		Runtime:        copts.runtime,
-		Mounts:         mounts,
+		Mounts:         copts.mounts.Value(),
 		MaskedPaths:    maskedPaths,
 		ReadonlyPaths:  readonlyPaths,
 		Annotations:    copts.annotations.GetAll(),
 	}
 
 	if copts.autoRemove && !hostConfig.RestartPolicy.IsNone() {
-		return nil, errors.Errorf("Conflicting options: --restart and --rm")
+		return nil, errors.Errorf("conflicting options: cannot specify both --restart and --rm")
 	}
 
 	// only set this value if the user provided the flag, else it should default to nil
@@ -715,7 +724,7 @@ func parse(flags *pflag.FlagSet, copts *containerOptions, serverOS string) (*con
 	// Put the endpoint-specific MacAddress of the "main" network attachment into the container Config for backward
 	// compatibility with older daemons.
 	if nw, ok := networkingConfig.EndpointsConfig[hostConfig.NetworkMode.NetworkName()]; ok {
-		config.MacAddress = nw.MacAddress
+		config.MacAddress = nw.MacAddress //nolint:staticcheck // ignore SA1019: field is deprecated, but still used on API < v1.44.
 	}
 
 	return &containerConfig{
@@ -753,7 +762,6 @@ func parseNetworkOpts(copts *containerOptions) (map[string]*networktypes.Endpoin
 	}
 
 	for i, n := range copts.netMode.Value() {
-		n := n
 		if container.NetworkMode(n.Target).IsUserDefined() {
 			hasUserDefined = true
 		} else {
@@ -850,7 +858,9 @@ func parseNetworkAttachmentOpt(ep opts.NetworkAttachmentOpts) (*networktypes.End
 		}
 	}
 
-	epConfig := &networktypes.EndpointSettings{}
+	epConfig := &networktypes.EndpointSettings{
+		GwPriority: ep.GwPriority,
+	}
 	epConfig.Aliases = append(epConfig.Aliases, ep.Aliases...)
 	if len(ep.DriverOpts) > 0 {
 		epConfig.DriverOpts = make(map[string]string)
@@ -914,16 +924,23 @@ func parseSecurityOpts(securityOpts []string) ([]string, error) {
 			// "no-new-privileges" is the only option that does not require a value.
 			return securityOpts, errors.Errorf("Invalid --security-opt: %q", opt)
 		}
-		if k == "seccomp" && v != "unconfined" {
-			f, err := os.ReadFile(v)
-			if err != nil {
-				return securityOpts, errors.Errorf("opening seccomp profile (%s) failed: %v", v, err)
+		if k == "seccomp" {
+			switch v {
+			case seccompProfileDefault, seccompProfileUnconfined:
+				// known special names for built-in profiles, nothing to do.
+			default:
+				// value may be a filename, in which case we send the profile's
+				// content if it's valid JSON.
+				f, err := os.ReadFile(v)
+				if err != nil {
+					return securityOpts, errors.Errorf("opening seccomp profile (%s) failed: %v", v, err)
+				}
+				b := bytes.NewBuffer(nil)
+				if err := json.Compact(b, f); err != nil {
+					return securityOpts, errors.Errorf("compacting json for seccomp profile (%s) failed: %v", v, err)
+				}
+				securityOpts[key] = fmt.Sprintf("seccomp=%s", b.Bytes())
 			}
-			b := bytes.NewBuffer(nil)
-			if err := json.Compact(b, f); err != nil {
-				return securityOpts, errors.Errorf("compacting json for seccomp profile (%s) failed: %v", v, err)
-			}
-			securityOpts[key] = fmt.Sprintf("seccomp=%s", b.Bytes())
 		}
 	}
 

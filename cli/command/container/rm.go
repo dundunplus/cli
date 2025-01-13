@@ -33,12 +33,14 @@ func NewRmCommand(dockerCli command.Cli) *cobra.Command {
 		Args:    cli.RequiresMinArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.containers = args
-			return runRm(dockerCli, &opts)
+			return runRm(cmd.Context(), dockerCli, &opts)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker container rm, docker container remove, docker rm",
 		},
-		ValidArgsFunction: completion.ContainerNames(dockerCli, true),
+		ValidArgsFunction: completion.ContainerNames(dockerCli, true, func(ctr container.Summary) bool {
+			return opts.force || ctr.State == "exited" || ctr.State == "created"
+		}),
 	}
 
 	flags := cmd.Flags()
@@ -48,9 +50,7 @@ func NewRmCommand(dockerCli command.Cli) *cobra.Command {
 	return cmd
 }
 
-func runRm(dockerCli command.Cli, opts *rmOptions) error {
-	ctx := context.Background()
-
+func runRm(ctx context.Context, dockerCli command.Cli, opts *rmOptions) error {
 	var errs []string
 	errChan := parallelOperation(ctx, opts.containers, func(ctx context.Context, ctrID string) error {
 		ctrID = strings.Trim(ctrID, "/")

@@ -61,6 +61,15 @@ func TestConvertEnvironment(t *testing.T) {
 	assert.Check(t, is.DeepEqual([]string{"foo=bar", "key=value"}, env))
 }
 
+func TestConvertEnvironmentWhenNilValueExists(t *testing.T) {
+	source := map[string]*string{
+		"key":            strPtr("value"),
+		"keyWithNoValue": nil,
+	}
+	env := convertEnvironment(source)
+	assert.Check(t, is.DeepEqual([]string{"key=value", "keyWithNoValue"}, env))
+}
+
 func TestConvertExtraHosts(t *testing.T) {
 	source := composetypes.HostsList{
 		"zulu:127.0.0.2",
@@ -231,6 +240,10 @@ func TestConvertServiceNetworks(t *testing.T) {
 	networks := map[string]*composetypes.ServiceNetworkConfig{
 		"front": {
 			Aliases: []string{"something"},
+			DriverOpts: map[string]string{
+				"driver.opt1": "optval1",
+				"driver.opt2": "optval2",
+			},
 		},
 		"back": {
 			Aliases: []string{"other"},
@@ -248,6 +261,10 @@ func TestConvertServiceNetworks(t *testing.T) {
 		{
 			Target:  "fronttier",
 			Aliases: []string{"something", "service"},
+			DriverOpts: map[string]string{
+				"driver.opt1": "optval1",
+				"driver.opt2": "optval2",
+			},
 		},
 	}
 
@@ -392,7 +409,6 @@ func TestConvertCredentialSpec(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			namespace := NewNamespace(tc.name)
 			swarmSpec, err := convertCredentialSpec(namespace, tc.in, tc.configs)
@@ -497,7 +513,7 @@ func TestConvertServiceSecrets(t *testing.T) {
 			Name: "bar_secret",
 		},
 	}
-	client := &fakeClient{
+	apiClient := &fakeClient{
 		secretListFunc: func(opts types.SecretListOptions) ([]swarm.Secret, error) {
 			assert.Check(t, is.Contains(opts.Filters.Get("name"), "foo_secret"))
 			assert.Check(t, is.Contains(opts.Filters.Get("name"), "bar_secret"))
@@ -507,7 +523,8 @@ func TestConvertServiceSecrets(t *testing.T) {
 			}, nil
 		},
 	}
-	refs, err := convertServiceSecrets(client, namespace, secrets, secretSpecs)
+	ctx := context.Background()
+	refs, err := convertServiceSecrets(ctx, apiClient, namespace, secrets, secretSpecs)
 	assert.NilError(t, err)
 	expected := []*swarm.SecretReference{
 		{
@@ -554,7 +571,7 @@ func TestConvertServiceConfigs(t *testing.T) {
 			Name: "baz_config",
 		},
 	}
-	client := &fakeClient{
+	apiClient := &fakeClient{
 		configListFunc: func(opts types.ConfigListOptions) ([]swarm.Config, error) {
 			assert.Check(t, is.Contains(opts.Filters.Get("name"), "foo_config"))
 			assert.Check(t, is.Contains(opts.Filters.Get("name"), "bar_config"))
@@ -566,7 +583,8 @@ func TestConvertServiceConfigs(t *testing.T) {
 			}, nil
 		},
 	}
-	refs, err := convertServiceConfigObjs(client, namespace, service, configSpecs)
+	ctx := context.Background()
+	refs, err := convertServiceConfigObjs(ctx, apiClient, namespace, service, configSpecs)
 	assert.NilError(t, err)
 	expected := []*swarm.ConfigReference{
 		{
@@ -672,7 +690,6 @@ func TestConvertServiceCapAddAndCapDrop(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.title, func(t *testing.T) {
 			result, err := Service("1.41", Namespace{name: "foo"}, tc.in, nil, nil, nil, nil)
 			assert.NilError(t, err)

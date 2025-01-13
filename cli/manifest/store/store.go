@@ -2,7 +2,6 @@ package store
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,8 +148,8 @@ func manifestToFilename(root, manifestList, manifest string) string {
 }
 
 func makeFilesafeName(ref string) string {
-	fileName := strings.Replace(ref, ":", "-", -1)
-	return strings.Replace(fileName, "/", "_", -1)
+	fileName := strings.ReplaceAll(ref, ":", "-")
+	return strings.ReplaceAll(fileName, "/", "_")
 }
 
 type notFoundError struct {
@@ -162,7 +161,7 @@ func newNotFoundError(ref string) *notFoundError {
 }
 
 func (n *notFoundError) Error() string {
-	return fmt.Sprintf("No such manifest: %s", n.object)
+	return "No such manifest: " + n.object
 }
 
 // NotFound interface

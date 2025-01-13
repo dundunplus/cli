@@ -16,7 +16,6 @@ import (
 	flagsHelper "github.com/docker/cli/cli/flags"
 	"github.com/docker/cli/opts"
 	"github.com/docker/cli/templates"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/events"
 	"github.com/spf13/cobra"
 )
@@ -37,7 +36,7 @@ func NewEventsCommand(dockerCli command.Cli) *cobra.Command {
 		Short: "Get real time events from the server",
 		Args:  cli.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEvents(dockerCli, &options)
+			return runEvents(cmd.Context(), dockerCli, &options)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker system events, docker events",
@@ -51,10 +50,12 @@ func NewEventsCommand(dockerCli command.Cli) *cobra.Command {
 	flags.VarP(&options.filter, "filter", "f", "Filter output based on conditions provided")
 	flags.StringVar(&options.format, "format", "", flagsHelper.InspectFormatHelp) // using the same flag description as "inspect" commands for now.
 
+	_ = cmd.RegisterFlagCompletionFunc("filter", completeEventFilters(dockerCli))
+
 	return cmd
 }
 
-func runEvents(dockerCli command.Cli, options *eventsOptions) error {
+func runEvents(ctx context.Context, dockerCli command.Cli, options *eventsOptions) error {
 	tmpl, err := makeTemplate(options.format)
 	if err != nil {
 		return cli.StatusError{
@@ -62,8 +63,8 @@ func runEvents(dockerCli command.Cli, options *eventsOptions) error {
 			Status:     "Error parsing format: " + err.Error(),
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	evts, errs := dockerCli.Client().Events(ctx, types.EventsOptions{
+	ctx, cancel := context.WithCancel(ctx)
+	evts, errs := dockerCli.Client().Events(ctx, events.ListOptions{
 		Since:   options.since,
 		Until:   options.until,
 		Filters: options.filter.Value(),

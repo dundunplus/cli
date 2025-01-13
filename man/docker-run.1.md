@@ -121,10 +121,10 @@ executables expect) and pass along signals. The **-a** option can be set for
 each of stdin, stdout, and stderr.
 
 **--add-host**=[]
-   Add a custom host-to-IP mapping (host:ip)
+   Add a custom host-to-IP mapping (host=ip, or host:ip)
 
-   Add a line to /etc/hosts. The format is hostname:ip.  The **--add-host**
-option can be set multiple times.
+   Add a line to /etc/hosts. The format is hostname=ip, or hostname:ip.
+   The **--add-host** option can be set multiple times.
 
 **--annotation**=[]
    Add an annotation to the container (passed through to the OCI runtime).
@@ -467,16 +467,20 @@ according to RFC4862.
    * `dst`, `destination`, `target`: mount destination spec.
    * `ro`, `readonly`: `true` or `false` (default).
 
-   **Note**: setting `readonly` for a bind mount does not make its submounts
-   read-only on the current Linux implementation. See also `bind-nonrecursive`.
+   **Note**: setting `readonly` for a bind mount may not make its submounts
+   read-only depending on the kernel version. See also `bind-recursive`.
 
    Options specific to `bind`:
 
    * `bind-propagation`: `shared`, `slave`, `private`, `rshared`, `rslave`, or `rprivate`(default). See also `mount(2)`.
    * `consistency`: `consistent`(default), `cached`, or `delegated`. Currently, only effective for Docker for Mac.
-   * `bind-nonrecursive`: `true` or `false` (default). If set to `true`,
-   submounts are not recursively bind-mounted. This option is useful for
-   `readonly` bind mount.
+   * `bind-recursive`: `enabled` (default), `disabled`, `writable`, or `readonly`:
+      If set to `enabled`, submounts are recursively bind-mounted and attempted to be made recursively read-only.
+      If set to `disabled`, submounts are not recursively bind-mounted.
+      If set to `writable`, submounts are recursively bind-mounted but not made recursively read-only.
+      If set to `readonly`, submounts are recursively bind-mounted and forcibly made recursively read-only.
+   * `bind-nonrecursive` (Deprecated): `true` or `false` (default). Setting `true` equates to `bind-recursive=disabled`.
+     Setting `false` equates to `bind-recursive=enabled`.
 
    Options specific to `volume`:
 

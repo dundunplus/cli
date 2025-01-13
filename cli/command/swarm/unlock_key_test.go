@@ -80,18 +80,21 @@ func TestSwarmUnlockKeyErrors(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cmd := newUnlockKeyCommand(
-			test.NewFakeCli(&fakeClient{
-				swarmInspectFunc:      tc.swarmInspectFunc,
-				swarmUpdateFunc:       tc.swarmUpdateFunc,
-				swarmGetUnlockKeyFunc: tc.swarmGetUnlockKeyFunc,
-			}))
-		cmd.SetArgs(tc.args)
-		for key, value := range tc.flags {
-			assert.Check(t, cmd.Flags().Set(key, value))
-		}
-		cmd.SetOut(io.Discard)
-		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newUnlockKeyCommand(
+				test.NewFakeCli(&fakeClient{
+					swarmInspectFunc:      tc.swarmInspectFunc,
+					swarmUpdateFunc:       tc.swarmUpdateFunc,
+					swarmGetUnlockKeyFunc: tc.swarmGetUnlockKeyFunc,
+				}))
+			cmd.SetArgs(tc.args)
+			for key, value := range tc.flags {
+				assert.Check(t, cmd.Flags().Set(key, value))
+			}
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
+		})
 	}
 }
 
@@ -154,17 +157,19 @@ func TestSwarmUnlockKey(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		cli := test.NewFakeCli(&fakeClient{
-			swarmInspectFunc:      tc.swarmInspectFunc,
-			swarmUpdateFunc:       tc.swarmUpdateFunc,
-			swarmGetUnlockKeyFunc: tc.swarmGetUnlockKeyFunc,
+		t.Run(tc.name, func(t *testing.T) {
+			cli := test.NewFakeCli(&fakeClient{
+				swarmInspectFunc:      tc.swarmInspectFunc,
+				swarmUpdateFunc:       tc.swarmUpdateFunc,
+				swarmGetUnlockKeyFunc: tc.swarmGetUnlockKeyFunc,
+			})
+			cmd := newUnlockKeyCommand(cli)
+			cmd.SetArgs(tc.args)
+			for key, value := range tc.flags {
+				assert.Check(t, cmd.Flags().Set(key, value))
+			}
+			assert.NilError(t, cmd.Execute())
+			golden.Assert(t, cli.OutBuffer().String(), fmt.Sprintf("unlockkeys-%s.golden", tc.name))
 		})
-		cmd := newUnlockKeyCommand(cli)
-		cmd.SetArgs(tc.args)
-		for key, value := range tc.flags {
-			assert.Check(t, cmd.Flags().Set(key, value))
-		}
-		assert.NilError(t, cmd.Execute())
-		golden.Assert(t, cli.OutBuffer().String(), fmt.Sprintf("unlockkeys-%s.golden", tc.name))
 	}
 }

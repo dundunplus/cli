@@ -67,7 +67,6 @@ func TestStackServicesErrors(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.expectedError, func(t *testing.T) {
 			cli := test.NewFakeCli(&fakeClient{
 				serviceListFunc: tc.serviceListFunc,
@@ -80,6 +79,7 @@ func TestStackServicesErrors(t *testing.T) {
 				assert.Check(t, cmd.Flags().Set(key, value))
 			}
 			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
 			assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 		})
 	}
@@ -89,6 +89,7 @@ func TestRunServicesWithEmptyName(t *testing.T) {
 	cmd := newServicesCommand(test.NewFakeCli(&fakeClient{}))
 	cmd.SetArgs([]string{"'   '"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 
 	assert.ErrorContains(t, cmd.Execute(), `invalid stack name: "'   '"`)
 }

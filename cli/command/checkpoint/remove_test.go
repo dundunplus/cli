@@ -19,11 +19,11 @@ func TestCheckpointRemoveErrors(t *testing.T) {
 	}{
 		{
 			args:          []string{"too-few-arguments"},
-			expectedError: "requires exactly 2 arguments",
+			expectedError: "requires 2 arguments",
 		},
 		{
 			args:          []string{"too", "many", "arguments"},
-			expectedError: "requires exactly 2 arguments",
+			expectedError: "requires 2 arguments",
 		},
 		{
 			args: []string{"foo", "bar"},
@@ -41,6 +41,7 @@ func TestCheckpointRemoveErrors(t *testing.T) {
 		cmd := newRemoveCommand(cli)
 		cmd.SetArgs(tc.args)
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }

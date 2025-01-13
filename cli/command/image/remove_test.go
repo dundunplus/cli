@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/docker/cli/internal/test"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/image"
 	"github.com/pkg/errors"
 	"gotest.tools/v3/assert"
@@ -19,7 +18,7 @@ type notFound struct {
 }
 
 func (n notFound) Error() string {
-	return fmt.Sprintf("Error: No such image: %s", n.imageID)
+	return "Error: No such image: " + n.imageID
 }
 
 func (n notFound) NotFound() {}
@@ -36,17 +35,17 @@ func TestNewRemoveCommandErrors(t *testing.T) {
 		name            string
 		args            []string
 		expectedError   string
-		imageRemoveFunc func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error)
+		imageRemoveFunc func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error)
 	}{
 		{
 			name:          "wrong args",
-			expectedError: "requires at least 1 argument.",
+			expectedError: "requires at least 1 argument",
 		},
 		{
 			name:          "ImageRemove fail with force option",
 			args:          []string{"-f", "image1"},
 			expectedError: "error removing image",
-			imageRemoveFunc: func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+			imageRemoveFunc: func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 				assert.Check(t, is.Equal("image1", img))
 				return []image.DeleteResponse{}, errors.Errorf("error removing image")
 			},
@@ -55,7 +54,7 @@ func TestNewRemoveCommandErrors(t *testing.T) {
 			name:          "ImageRemove fail",
 			args:          []string{"arg1"},
 			expectedError: "error removing image",
-			imageRemoveFunc: func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+			imageRemoveFunc: func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 				assert.Check(t, !options.Force)
 				assert.Check(t, options.PruneChildren)
 				return []image.DeleteResponse{}, errors.Errorf("error removing image")
@@ -68,6 +67,7 @@ func TestNewRemoveCommandErrors(t *testing.T) {
 				imageRemoveFunc: tc.imageRemoveFunc,
 			}))
 			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
 			cmd.SetArgs(tc.args)
 			assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 		})
@@ -78,13 +78,13 @@ func TestNewRemoveCommandSuccess(t *testing.T) {
 	testCases := []struct {
 		name            string
 		args            []string
-		imageRemoveFunc func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error)
+		imageRemoveFunc func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error)
 		expectedStderr  string
 	}{
 		{
 			name: "Image Deleted",
 			args: []string{"image1"},
-			imageRemoveFunc: func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+			imageRemoveFunc: func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 				assert.Check(t, is.Equal("image1", img))
 				return []image.DeleteResponse{{Deleted: img}}, nil
 			},
@@ -92,7 +92,7 @@ func TestNewRemoveCommandSuccess(t *testing.T) {
 		{
 			name: "Image not found with force option",
 			args: []string{"-f", "image1"},
-			imageRemoveFunc: func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+			imageRemoveFunc: func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 				assert.Check(t, is.Equal("image1", img))
 				assert.Check(t, is.Equal(true, options.Force))
 				return []image.DeleteResponse{}, notFound{"image1"}
@@ -103,7 +103,7 @@ func TestNewRemoveCommandSuccess(t *testing.T) {
 		{
 			name: "Image Untagged",
 			args: []string{"image1"},
-			imageRemoveFunc: func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+			imageRemoveFunc: func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 				assert.Check(t, is.Equal("image1", img))
 				return []image.DeleteResponse{{Untagged: img}}, nil
 			},
@@ -111,7 +111,7 @@ func TestNewRemoveCommandSuccess(t *testing.T) {
 		{
 			name: "Image Deleted and Untagged",
 			args: []string{"image1", "image2"},
-			imageRemoveFunc: func(img string, options types.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+			imageRemoveFunc: func(img string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 				if img == "image1" {
 					return []image.DeleteResponse{{Untagged: img}}, nil
 				}
@@ -124,6 +124,7 @@ func TestNewRemoveCommandSuccess(t *testing.T) {
 			cli := test.NewFakeCli(&fakeClient{imageRemoveFunc: tc.imageRemoveFunc})
 			cmd := NewRemoveCommand(cli)
 			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
 			cmd.SetArgs(tc.args)
 			assert.NilError(t, cmd.Execute())
 			assert.Check(t, is.Equal(tc.expectedStderr, cli.ErrBuffer().String()))
