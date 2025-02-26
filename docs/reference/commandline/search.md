@@ -10,7 +10,7 @@ Search Docker Hub for images
 | [`-f`](#filter), [`--filter`](#filter) | `filter` |         | Filter output based on conditions provided |
 | [`--format`](#format)                  | `string` |         | Pretty-print search using a Go template    |
 | [`--limit`](#limit)                    | `int`    | `0`     | Max number of search results               |
-| [`--no-trunc`](#no-trunc)              |          |         | Don't truncate output                      |
+| [`--no-trunc`](#no-trunc)              | `bool`   |         | Don't truncate output                      |
 
 
 <!---MARKER_GEN_END-->
@@ -78,7 +78,7 @@ value is set, the default is set by the daemon.
 ### <a name="filter"></a> Filtering (--filter)
 
 The filtering flag (`-f` or `--filter`) format is a `key=value` pair. If there is more
-than one filter, then pass multiple flags (e.g. `--filter is-official=true --filter stars=3`)
+than one filter, then pass multiple flags (e.g. `--filter is-official=true --filter stars=3`).
 
 The currently supported filters are:
 

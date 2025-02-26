@@ -161,14 +161,13 @@ func TestServiceListServiceStatus(t *testing.T) {
 		for _, tc := range tests {
 			if quiet {
 				tc.withQuiet = quiet
-				tc.doc = tc.doc + " with quiet"
+				tc.doc += " with quiet"
 			}
 			matrix = append(matrix, tc)
 		}
 	}
 
 	for _, tc := range matrix {
-		tc := tc
 		t.Run(tc.doc, func(t *testing.T) {
 			if tc.cluster == nil {
 				tc.cluster = generateCluster(t, tc.opts)

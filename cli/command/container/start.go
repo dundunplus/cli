@@ -9,7 +9,6 @@ import (
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/completion"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/moby/sys/signal"
 	"github.com/moby/term"
@@ -28,13 +27,6 @@ type StartOptions struct {
 	Containers []string
 }
 
-// NewStartOptions creates a new StartOptions.
-//
-// Deprecated: create a new [StartOptions] directly.
-func NewStartOptions() StartOptions {
-	return StartOptions{}
-}
-
 // NewStartCommand creates a new cobra.Command for `docker start`
 func NewStartCommand(dockerCli command.Cli) *cobra.Command {
 	var opts StartOptions
@@ -45,13 +37,13 @@ func NewStartCommand(dockerCli command.Cli) *cobra.Command {
 		Args:  cli.RequiresMinArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Containers = args
-			return RunStart(dockerCli, &opts)
+			return RunStart(cmd.Context(), dockerCli, &opts)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker container start, docker start",
 		},
-		ValidArgsFunction: completion.ContainerNames(dockerCli, true, func(container types.Container) bool {
-			return container.State == "exited" || container.State == "created"
+		ValidArgsFunction: completion.ContainerNames(dockerCli, true, func(ctr container.Summary) bool {
+			return ctr.State == "exited" || ctr.State == "created"
 		}),
 	}
 
@@ -72,11 +64,12 @@ func NewStartCommand(dockerCli command.Cli) *cobra.Command {
 // RunStart executes a `start` command
 //
 //nolint:gocyclo
-func RunStart(dockerCli command.Cli, opts *StartOptions) error {
-	ctx, cancelFun := context.WithCancel(context.Background())
+func RunStart(ctx context.Context, dockerCli command.Cli, opts *StartOptions) error {
+	ctx, cancelFun := context.WithCancel(ctx)
 	defer cancelFun()
 
-	if opts.Attach || opts.OpenStdin {
+	switch {
+	case opts.Attach || opts.OpenStdin:
 		// We're going to attach to a container.
 		// 1. Ensure we only have one container.
 		if len(opts.Containers) > 1 {
@@ -93,7 +86,8 @@ func RunStart(dockerCli command.Cli, opts *StartOptions) error {
 		// We always use c.ID instead of container to maintain consistency during `docker start`
 		if !c.Config.Tty {
 			sigc := notifyAllSignals()
-			go ForwardAllSignals(ctx, dockerCli, c.ID, sigc)
+			bgCtx := context.WithoutCancel(ctx)
+			go ForwardAllSignals(bgCtx, dockerCli.Client(), c.ID, sigc)
 			defer signal.StopCatch(sigc)
 		}
 
@@ -180,7 +174,8 @@ func RunStart(dockerCli command.Cli, opts *StartOptions) error {
 		if status := <-statusChan; status != 0 {
 			return cli.StatusError{StatusCode: status}
 		}
-	} else if opts.Checkpoint != "" {
+		return nil
+	case opts.Checkpoint != "":
 		if len(opts.Containers) > 1 {
 			return errors.New("you cannot restore multiple containers at once")
 		}
@@ -189,14 +184,11 @@ func RunStart(dockerCli command.Cli, opts *StartOptions) error {
 			CheckpointID:  opts.Checkpoint,
 			CheckpointDir: opts.CheckpointDir,
 		})
-
-	} else {
+	default:
 		// We're not going to attach to anything.
 		// Start as many containers as we want.
 		return startContainersWithoutAttachments(ctx, dockerCli, opts.Containers)
 	}
-
-	return nil
 }
 
 func startContainersWithoutAttachments(ctx context.Context, dockerCli command.Cli, containers []string) error {

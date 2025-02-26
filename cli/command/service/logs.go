@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
+	"github.com/docker/cli/cli/command/completion"
 	"github.com/docker/cli/cli/command/idresolver"
 	"github.com/docker/cli/service/logs"
 	"github.com/docker/docker/api/types"
@@ -22,6 +23,7 @@ import (
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type logsOptions struct {
@@ -47,7 +49,7 @@ func newLogsCommand(dockerCli command.Cli) *cobra.Command {
 		Args:  cli.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.target = args[0]
-			return runLogs(dockerCli, &opts)
+			return runLogs(cmd.Context(), dockerCli, &opts)
 		},
 		Annotations: map[string]string{"version": "1.29"},
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -69,12 +71,17 @@ func newLogsCommand(dockerCli command.Cli) *cobra.Command {
 	flags.BoolVar(&opts.details, "details", false, "Show extra details provided to logs")
 	flags.SetAnnotation("details", "version", []string{"1.30"})
 	flags.StringVarP(&opts.tail, "tail", "n", "all", "Number of lines to show from the end of the logs")
+
+	flags.VisitAll(func(flag *pflag.Flag) {
+		// Set a default completion function if none was set. We don't look
+		// up if it does already have one set, because Cobra does this for
+		// us, and returns an error (which we ignore for this reason).
+		_ = cmd.RegisterFlagCompletionFunc(flag.Name, completion.NoComplete)
+	})
 	return cmd
 }
 
-func runLogs(dockerCli command.Cli, opts *logsOptions) error {
-	ctx := context.Background()
-
+func runLogs(ctx context.Context, dockerCli command.Cli, opts *logsOptions) error {
 	apiClient := dockerCli.Client()
 
 	var (
@@ -181,12 +188,12 @@ type taskFormatter struct {
 	cache map[logContext]string
 }
 
-func newTaskFormatter(client client.APIClient, opts *logsOptions, padding int) *taskFormatter {
+func newTaskFormatter(apiClient client.APIClient, opts *logsOptions, padding int) *taskFormatter {
 	return &taskFormatter{
-		client:  client,
+		client:  apiClient,
 		opts:    opts,
 		padding: padding,
-		r:       idresolver.New(client, opts.noResolve),
+		r:       idresolver.New(apiClient, opts.noResolve),
 		cache:   make(map[logContext]string),
 	}
 }
@@ -214,9 +221,9 @@ func (f *taskFormatter) format(ctx context.Context, logCtx logContext) (string, 
 	taskName := fmt.Sprintf("%s.%d", serviceName, task.Slot)
 	if !f.opts.noTaskIDs {
 		if f.opts.noTrunc {
-			taskName += fmt.Sprintf(".%s", task.ID)
+			taskName += "." + task.ID
 		} else {
-			taskName += fmt.Sprintf(".%s", stringid.TruncateID(task.ID))
+			taskName += "." + stringid.TruncateID(task.ID)
 		}
 	}
 
@@ -267,7 +274,7 @@ func (lw *logWriter) Write(buf []byte) (int, error) {
 	// and then create a context from the details
 	// this removes the context-specific details from the details map, so we
 	// can more easily print the details later
-	logCtx, err := lw.parseContext(details)
+	logCtx, err := parseContext(details)
 	if err != nil {
 		return 0, err
 	}
@@ -319,7 +326,7 @@ func (lw *logWriter) Write(buf []byte) (int, error) {
 }
 
 // parseContext returns a log context and REMOVES the context from the details map
-func (lw *logWriter) parseContext(details map[string]string) (logContext, error) {
+func parseContext(details map[string]string) (logContext, error) {
 	nodeID, ok := details["com.docker.swarm.node.id"]
 	if !ok {
 		return logContext{}, errors.Errorf("missing node id in details: %v", details)

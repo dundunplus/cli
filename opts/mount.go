@@ -43,6 +43,13 @@ func (m *MountOpt) Set(value string) error {
 		return mount.VolumeOptions
 	}
 
+	imageOptions := func() *mounttypes.ImageOptions {
+		if mount.ImageOptions == nil {
+			mount.ImageOptions = new(mounttypes.ImageOptions)
+		}
+		return mount.ImageOptions
+	}
+
 	bindOptions := func() *mounttypes.BindOptions {
 		if mount.BindOptions == nil {
 			mount.BindOptions = new(mounttypes.BindOptions)
@@ -116,16 +123,7 @@ func (m *MountOpt) Set(value string) error {
 			}
 			logrus.Warn("bind-nonrecursive is deprecated, use bind-recursive=disabled instead")
 		case "bind-recursive":
-			valS := val
-			// Allow boolean as an alias to "enabled" or "disabled"
-			if b, err := strconv.ParseBool(valS); err == nil {
-				if b {
-					valS = "enabled"
-				} else {
-					valS = "disabled"
-				}
-			}
-			switch valS {
+			switch val {
 			case "enabled": // read-only mounts are recursively read-only if Engine >= v25 && kernel >= v5.12, otherwise writable
 				// NOP
 			case "disabled": // alias of bind-nonrecursive=true
@@ -140,6 +138,8 @@ func (m *MountOpt) Set(value string) error {
 				return fmt.Errorf("invalid value for %s: %s (must be \"enabled\", \"disabled\", \"writable\", or \"readonly\")",
 					key, val)
 			}
+		case "volume-subpath":
+			volumeOptions().Subpath = val
 		case "volume-nocopy":
 			volumeOptions().NoCopy, err = strconv.ParseBool(val)
 			if err != nil {
@@ -154,6 +154,8 @@ func (m *MountOpt) Set(value string) error {
 				volumeOptions().DriverConfig.Options = make(map[string]string)
 			}
 			setValueOnMap(volumeOptions().DriverConfig.Options, val)
+		case "image-subpath":
+			imageOptions().Subpath = val
 		case "tmpfs-size":
 			sizeBytes, err := units.RAMInBytes(val)
 			if err != nil {
@@ -172,15 +174,18 @@ func (m *MountOpt) Set(value string) error {
 	}
 
 	if mount.Type == "" {
-		return fmt.Errorf("type is required")
+		return errors.New("type is required")
 	}
 
 	if mount.Target == "" {
-		return fmt.Errorf("target is required")
+		return errors.New("target is required")
 	}
 
 	if mount.VolumeOptions != nil && mount.Type != mounttypes.TypeVolume {
 		return fmt.Errorf("cannot mix 'volume-*' options with mount type '%s'", mount.Type)
+	}
+	if mount.ImageOptions != nil && mount.Type != mounttypes.TypeImage {
+		return fmt.Errorf("cannot mix 'image-*' options with mount type '%s'", mount.Type)
 	}
 	if mount.BindOptions != nil && mount.Type != mounttypes.TypeBind {
 		return fmt.Errorf("cannot mix 'bind-*' options with mount type '%s'", mount.Type)
@@ -210,7 +215,7 @@ func (m *MountOpt) Set(value string) error {
 }
 
 // Type returns the type of this option
-func (m *MountOpt) Type() string {
+func (*MountOpt) Type() string {
 	return "mount"
 }
 

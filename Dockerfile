@@ -1,13 +1,19 @@
 # syntax=docker/dockerfile:1
 
 ARG BASE_VARIANT=alpine
-ARG GO_VERSION=1.21.3
-ARG ALPINE_VERSION=3.17
-ARG XX_VERSION=1.2.1
-ARG GOVERSIONINFO_VERSION=v1.3.0
-ARG GOTESTSUM_VERSION=v1.10.0
-ARG BUILDX_VERSION=0.11.2
-ARG COMPOSE_VERSION=v2.22.0
+ARG ALPINE_VERSION=3.21
+ARG BASE_DEBIAN_DISTRO=bookworm
+
+ARG GO_VERSION=1.23.6
+ARG XX_VERSION=1.6.1
+ARG GOVERSIONINFO_VERSION=v1.4.1
+ARG GOTESTSUM_VERSION=v1.12.0
+
+# BUILDX_VERSION sets the version of buildx to use for the e2e tests.
+# It must be a tag in the docker.io/docker/buildx-bin image repository
+# on Docker Hub.
+ARG BUILDX_VERSION=0.20.1
+ARG COMPOSE_VERSION=v2.32.4
 
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_VERSION} AS xx
 
@@ -22,22 +28,15 @@ ARG TARGETPLATFORM
 # gcc is installed for libgcc only
 RUN xx-apk add --no-cache musl-dev gcc
 
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bullseye AS build-base-bullseye
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-${BASE_DEBIAN_DISTRO} AS build-base-debian
 ENV GOTOOLCHAIN=local
 COPY --link --from=xx / /
 RUN apt-get update && apt-get install --no-install-recommends -y bash clang lld llvm file
 WORKDIR /go/src/github.com/docker/cli
 
-FROM build-base-bullseye AS build-bullseye
+FROM build-base-debian AS build-debian
 ARG TARGETPLATFORM
-RUN xx-apt-get install --no-install-recommends -y libc6-dev libgcc-10-dev
-# workaround for issue with llvm 11 for darwin/amd64 platform:
-#  # github.com/docker/cli/cmd/docker
-#  /usr/local/go/pkg/tool/linux_amd64/link: /usr/local/go/pkg/tool/linux_amd64/link: running strip failed: exit status 1
-#  llvm-strip: error: unsupported load command (cmd=0x5)
-# more info: https://github.com/docker/cli/pull/3717
-# FIXME: remove once llvm 12 available on debian
-RUN [ "$TARGETPLATFORM" != "darwin/amd64" ] || ln -sfnT /bin/true /usr/bin/llvm-strip
+RUN xx-apt-get install --no-install-recommends -y libc6-dev libgcc-12-dev pkgconf
 
 FROM build-base-${BASE_VARIANT} AS goversioninfo
 ARG GOVERSIONINFO_VERSION
@@ -66,11 +65,8 @@ ARG VERSION
 # PACKAGER_NAME sets the company that produced the windows binary
 ARG PACKAGER_NAME
 COPY --link --from=goversioninfo /out/goversioninfo /usr/bin/goversioninfo
-# in bullseye arm64 target does not link with lld so configure it to use ld instead
-RUN [ ! -f /etc/alpine-release ] && xx-info is-cross && [ "$(xx-info arch)" = "arm64" ] && XX_CC_PREFER_LINKER=ld xx-clang --setup-target-triple || true
 RUN --mount=type=bind,target=.,ro \
     --mount=type=cache,target=/root/.cache \
-    --mount=from=dockercore/golang-cross:xx-sdk-extras,target=/xx-sdk,src=/xx-sdk \
     --mount=type=tmpfs,target=cli/winresources \
     # override the default behavior of go with xx-go
     xx-go --wrap && \
@@ -96,14 +92,13 @@ ARG GO_STRIP
 ARG CGO_ENABLED
 ARG VERSION
 RUN --mount=ro --mount=type=cache,target=/root/.cache \
-    --mount=from=dockercore/golang-cross:xx-sdk-extras,target=/xx-sdk,src=/xx-sdk \
     xx-go --wrap && \
     TARGET=/out ./scripts/build/plugins e2e/cli-plugins/plugins/*
 
 FROM build-base-alpine AS e2e-base-alpine
 RUN apk add --no-cache build-base curl openssl openssh-client
 
-FROM build-base-bullseye AS e2e-base-bullseye
+FROM build-base-debian AS e2e-base-debian
 RUN apt-get update && apt-get install -y build-essential curl openssl openssh-client
 
 FROM docker/buildx-bin:${BUILDX_VERSION}   AS buildx
@@ -129,6 +124,15 @@ COPY --link . .
 
 FROM scratch AS plugins
 COPY --from=build-plugins /out .
+
+FROM scratch AS bin-image-linux
+COPY --from=build /out/docker /docker
+FROM scratch AS bin-image-darwin
+COPY --from=build /out/docker /docker
+FROM scratch AS bin-image-windows
+COPY --from=build /out/docker /docker.exe
+
+FROM bin-image-${TARGETOS} AS bin-image
 
 FROM scratch AS binary
 COPY --from=build /out .

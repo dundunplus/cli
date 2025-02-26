@@ -101,27 +101,30 @@ func (c *client) MountBlob(ctx context.Context, sourceRef reference.Canonical, t
 func (c *client) PutManifest(ctx context.Context, ref reference.Named, manifest distribution.Manifest) (digest.Digest, error) {
 	repoEndpoint, err := newDefaultRepositoryEndpoint(ref, c.insecureRegistry)
 	if err != nil {
-		return digest.Digest(""), err
+		return "", err
 	}
 
 	repoEndpoint.actions = trust.ActionsPushAndPull
 	repo, err := c.getRepositoryForReference(ctx, ref, repoEndpoint)
 	if err != nil {
-		return digest.Digest(""), err
+		return "", err
 	}
 
 	manifestService, err := repo.Manifests(ctx)
 	if err != nil {
-		return digest.Digest(""), err
+		return "", err
 	}
 
 	_, opts, err := getManifestOptionsFromReference(ref)
 	if err != nil {
-		return digest.Digest(""), err
+		return "", err
 	}
 
 	dgst, err := manifestService.Put(ctx, manifest, opts...)
-	return dgst, errors.Wrapf(err, "failed to put manifest %s", ref)
+	if err != nil {
+		return dgst, errors.Wrapf(err, "failed to put manifest %s", ref)
+	}
+	return dgst, nil
 }
 
 func (c *client) getRepositoryForReference(ctx context.Context, ref reference.Named, repoEndpoint repositoryEndpoint) (distribution.Repository, error) {
@@ -157,7 +160,10 @@ func (c *client) getHTTPTransportForRepoEndpoint(ctx context.Context, repoEndpoi
 		c.userAgent,
 		repoEndpoint.actions,
 	)
-	return httpTransport, errors.Wrap(err, "failed to configure transport")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to configure transport")
+	}
+	return httpTransport, nil
 }
 
 // GetManifest returns an ImageManifest for the reference
