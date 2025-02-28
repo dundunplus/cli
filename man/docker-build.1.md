@@ -11,7 +11,7 @@ docker-build - Build an image from a Dockerfile
 [**-c**|**--cpu-shares**[=*0*]]
 [**--cgroup-parent**[=*CGROUP-PARENT*]]
 [**--help**]
-[**--iidfile**[=*CIDFILE*]]
+[**--iidfile**[=*IIDFILE*]]
 [**-f**|**--file**[=*PATH/Dockerfile*]]
 [**-squash**] *Experimental*
 [**--force-rm**]
@@ -78,10 +78,10 @@ set as the **URL**, the repository is cloned locally and then sent as the contex
    layers in tact, and one for the squashed version.
 
 **--add-host** []
-   Add a custom host-to-IP mapping (host:ip)
+   Add a custom host-to-IP mapping (host=ip, or host:ip)
 
-   Add a line to /etc/hosts. The format is hostname:ip.  The **--add-host**
-option can be set multiple times.
+   Add a line to /etc/hosts. The format is hostname=ip, or hostname:ip.
+   The **--add-host** option can be set multiple times.
 
 **--build-arg** *variable*
    name and value of a **buildarg**.
@@ -347,8 +347,6 @@ Linux namespaces. On Microsoft Windows, you can specify these values:
 * `default`: Use the value specified by the Docker daemon's `--exec-opt` . If the `daemon` does not specify an isolation technology, Microsoft Windows uses `process` as its default value.
 * `process`: Namespace isolation only.
 * `hyperv`: Hyper-V hypervisor partition-based isolation.
-
-Specifying the `--isolation` flag without a value is the same as setting `--isolation "default"`.
 
 # HISTORY
 March 2014, Originally compiled by William Henry (whenry at redhat dot com)

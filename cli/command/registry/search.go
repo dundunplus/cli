@@ -8,7 +8,6 @@ import (
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/formatter"
 	"github.com/docker/cli/opts"
-	"github.com/docker/docker/api/types"
 	registrytypes "github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/registry"
 	"github.com/spf13/cobra"
@@ -32,7 +31,7 @@ func NewSearchCommand(dockerCli command.Cli) *cobra.Command {
 		Args:  cli.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.term = args[0]
-			return runSearch(dockerCli, options)
+			return runSearch(cmd.Context(), dockerCli, options)
 		},
 		Annotations: map[string]string{
 			"category-top": "10",
@@ -49,7 +48,7 @@ func NewSearchCommand(dockerCli command.Cli) *cobra.Command {
 	return cmd
 }
 
-func runSearch(dockerCli command.Cli, options searchOptions) error {
+func runSearch(ctx context.Context, dockerCli command.Cli, options searchOptions) error {
 	if options.filter.Value().Contains("is-automated") {
 		_, _ = fmt.Fprintln(dockerCli.Err(), `WARNING: the "is-automated" filter is deprecated, and searching for "is-automated=true" will not yield any results in future.`)
 	}
@@ -64,9 +63,8 @@ func runSearch(dockerCli command.Cli, options searchOptions) error {
 		return err
 	}
 
-	ctx := context.Background()
 	requestPrivilege := command.RegistryAuthenticationPrivilegedFunc(dockerCli, indexInfo, "search")
-	results, err := dockerCli.Client().ImageSearch(ctx, options.term, types.ImageSearchOptions{
+	results, err := dockerCli.Client().ImageSearch(ctx, options.term, registrytypes.SearchOptions{
 		RegistryAuth:  encodedAuth,
 		PrivilegeFunc: requestPrivilege,
 		Filters:       options.filter.Value(),

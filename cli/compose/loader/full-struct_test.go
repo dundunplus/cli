@@ -1,3 +1,6 @@
+// FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
+//go:build go1.22
+
 package loader
 
 import (
@@ -8,16 +11,16 @@ import (
 
 func fullExampleConfig(workingDir, homeDir string) *types.Config {
 	return &types.Config{
-		Version:  "3.12",
+		Version:  "3.13",
 		Services: services(workingDir, homeDir),
 		Networks: networks(),
 		Volumes:  volumes(),
 		Configs:  configs(workingDir),
 		Secrets:  secrets(workingDir),
-		Extras: map[string]interface{}{
+		Extras: map[string]any{
 			"x-foo": "bar",
 			"x-bar": "baz",
-			"x-nested": map[string]interface{}{
+			"x-nested": map[string]any{
 				"foo": "bar",
 				"bar": "baz",
 			},
@@ -149,7 +152,7 @@ func services(workingDir, homeDir string) []types.ServiceConfig {
 				"otherhost:50.31.209.229",
 				"host.docker.internal:host-gateway",
 			},
-			Extras: map[string]interface{}{
+			Extras: map[string]any{
 				"x-bar": "baz",
 				"x-foo": "bar",
 			},
@@ -187,6 +190,10 @@ func services(workingDir, homeDir string) []types.ServiceConfig {
 					Aliases:     []string{"alias1", "alias3"},
 					Ipv4Address: "",
 					Ipv6Address: "",
+					DriverOpts: map[string]string{
+						"driveropt1": "optval1",
+						"driveropt2": "optval2",
+					},
 				},
 				"other-network": {
 					Ipv4Address: "172.16.238.10",
@@ -415,7 +422,7 @@ func networks() map[string]types.NetworkConfig {
 		"other-external-network": {
 			Name:     "my-cool-network",
 			External: types.External{External: true},
-			Extras: map[string]interface{}{
+			Extras: map[string]any{
 				"x-bar": "baz",
 				"x-foo": "bar",
 			},
@@ -455,7 +462,7 @@ func volumes() map[string]types.VolumeConfig {
 		"external-volume3": {
 			Name:     "this-is-volume3",
 			External: types.External{External: true},
-			Extras: map[string]interface{}{
+			Extras: map[string]any{
 				"x-bar": "baz",
 				"x-foo": "bar",
 			},
@@ -517,7 +524,7 @@ func configs(workingDir string) map[string]types.ConfigObjConfig {
 		"config4": {
 			Name: "foo",
 			File: workingDir,
-			Extras: map[string]interface{}{
+			Extras: map[string]any{
 				"x-bar": "baz",
 				"x-foo": "bar",
 			},
@@ -544,7 +551,7 @@ func secrets(workingDir string) map[string]types.SecretConfig {
 		"secret4": {
 			Name: "bar",
 			File: workingDir,
-			Extras: map[string]interface{}{
+			Extras: map[string]any{
 				"x-bar": "baz",
 				"x-foo": "bar",
 			},

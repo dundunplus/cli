@@ -1,6 +1,7 @@
 package container
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	networktypes "github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
@@ -64,22 +64,83 @@ func setupRunFlags() (*pflag.FlagSet, *containerOptions) {
 	return flags, copts
 }
 
-func mustParse(t *testing.T, args string) (*container.Config, *container.HostConfig) {
+func mustParse(t *testing.T, args string) (*container.Config, *container.HostConfig, *networktypes.NetworkingConfig) {
 	t.Helper()
-	config, hostConfig, _, err := parseRun(append(strings.Split(args, " "), "ubuntu", "bash"))
+	config, hostConfig, nwConfig, err := parseRun(append(strings.Split(args, " "), "ubuntu", "bash"))
 	assert.NilError(t, err)
-	return config, hostConfig
+	return config, hostConfig, nwConfig
 }
 
 func TestParseRunLinks(t *testing.T) {
-	if _, hostConfig := mustParse(t, "--link a:b"); len(hostConfig.Links) == 0 || hostConfig.Links[0] != "a:b" {
-		t.Fatalf("Error parsing links. Expected []string{\"a:b\"}, received: %v", hostConfig.Links)
+	tests := []struct {
+		name               string
+		input              string
+		expHostConfigLinks []string
+		expNetConfigLinks  map[string][]string
+	}{
+		// Default bridge - legacy links ...
+		{
+			name:               "default/onelink",
+			input:              "--link a:b",
+			expHostConfigLinks: []string{"a:b"},
+			expNetConfigLinks:  map[string][]string{"default": nil},
+		},
+		{
+			name:               "default/twolinks",
+			input:              "--link a:b --link c:d",
+			expHostConfigLinks: []string{"a:b", "c:d"},
+			expNetConfigLinks:  map[string][]string{"default": nil},
+		},
+		{
+			name:               "bridge/onelink",
+			input:              "--network bridge --link a:b",
+			expHostConfigLinks: []string{"a:b"},
+			// expNetConfigLinks - no EndpointsConfig is created for a single named network with no options set.
+			// See the "For backward compatibility" comment in parseNetworkOpts().
+		},
+		{
+			name:              "default/nolinks",
+			expNetConfigLinks: map[string][]string{"default": nil},
+		},
+
+		// User-defined bridge - links become DNS aliases ...
+		{
+			name:               "userdefnet/onelink",
+			input:              "--network userdefnet --link a:b",
+			expHostConfigLinks: []string{"a:b"},
+			expNetConfigLinks:  map[string][]string{"userdefnet": {"a:b"}},
+		},
+		{
+			name:               "userdefnet/twolinks",
+			input:              "--network userdefnet --link a:b --link c:d",
+			expHostConfigLinks: []string{"a:b", "c:d"},
+			expNetConfigLinks:  map[string][]string{"userdefnet": {"a:b", "c:d"}},
+		},
+		{
+			name:  "userdefnet/nolinks",
+			input: "--network userdefnet",
+		},
+		{
+			// Link options are applied to the first network (and there's no "advanced syntax"
+			// link key, like "--network name=userdefnet,link=a:b").
+			name:               "links apply to the first network",
+			input:              "--network userdefnet --link a:b --network bar --link c:d",
+			expHostConfigLinks: []string{"a:b", "c:d"},
+			expNetConfigLinks:  map[string][]string{"userdefnet": {"a:b", "c:d"}, "bar": nil},
+		},
 	}
-	if _, hostConfig := mustParse(t, "--link a:b --link c:d"); len(hostConfig.Links) < 2 || hostConfig.Links[0] != "a:b" || hostConfig.Links[1] != "c:d" {
-		t.Fatalf("Error parsing links. Expected []string{\"a:b\", \"c:d\"}, received: %v", hostConfig.Links)
-	}
-	if _, hostConfig := mustParse(t, ""); len(hostConfig.Links) != 0 {
-		t.Fatalf("Error parsing links. No link expected, received: %v", hostConfig.Links)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, hostConfig, netConfig := mustParse(t, tc.input)
+			assert.Check(t, is.DeepEqual(hostConfig.Links, tc.expHostConfigLinks))
+			assert.Check(t, is.Len(netConfig.EndpointsConfig, len(tc.expNetConfigLinks)))
+			for netName, expLinks := range tc.expNetConfigLinks {
+				nc, ok := netConfig.EndpointsConfig[netName]
+				assert.Assert(t, ok)
+				assert.Check(t, is.DeepEqual(nc.Links, expLinks))
+			}
+		})
 	}
 }
 
@@ -126,9 +187,8 @@ func TestParseRunAttach(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.input, func(t *testing.T) {
-			config, _ := mustParse(t, tc.input)
+			config, _, _ := mustParse(t, tc.input)
 			assert.Equal(t, config.AttachStdin, tc.expected.AttachStdin)
 			assert.Equal(t, config.AttachStdout, tc.expected.AttachStdout)
 			assert.Equal(t, config.AttachStderr, tc.expected.AttachStderr)
@@ -186,7 +246,7 @@ func TestParseRunWithInvalidArgs(t *testing.T) {
 func TestParseWithVolumes(t *testing.T) {
 	// A single volume
 	arr, tryit := setupPlatformVolume([]string{`/tmp`}, []string{`c:\tmp`})
-	if config, hostConfig := mustParse(t, tryit); hostConfig.Binds != nil {
+	if config, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds != nil {
 		t.Fatalf("Error parsing volume flags, %q should not mount-bind anything. Received %v", tryit, hostConfig.Binds)
 	} else if _, exists := config.Volumes[arr[0]]; !exists {
 		t.Fatalf("Error parsing volume flags, %q is missing from volumes. Received %v", tryit, config.Volumes)
@@ -194,23 +254,23 @@ func TestParseWithVolumes(t *testing.T) {
 
 	// Two volumes
 	arr, tryit = setupPlatformVolume([]string{`/tmp`, `/var`}, []string{`c:\tmp`, `c:\var`})
-	if config, hostConfig := mustParse(t, tryit); hostConfig.Binds != nil {
+	if config, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds != nil {
 		t.Fatalf("Error parsing volume flags, %q should not mount-bind anything. Received %v", tryit, hostConfig.Binds)
 	} else if _, exists := config.Volumes[arr[0]]; !exists {
 		t.Fatalf("Error parsing volume flags, %s is missing from volumes. Received %v", arr[0], config.Volumes)
-	} else if _, exists := config.Volumes[arr[1]]; !exists {
+	} else if _, exists := config.Volumes[arr[1]]; !exists { //nolint:govet // ignore shadow-check
 		t.Fatalf("Error parsing volume flags, %s is missing from volumes. Received %v", arr[1], config.Volumes)
 	}
 
 	// A single bind mount
 	arr, tryit = setupPlatformVolume([]string{`/hostTmp:/containerTmp`}, []string{os.Getenv("TEMP") + `:c:\containerTmp`})
-	if config, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || hostConfig.Binds[0] != arr[0] {
+	if config, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || hostConfig.Binds[0] != arr[0] {
 		t.Fatalf("Error parsing volume flags, %q should mount-bind the path before the colon into the path after the colon. Received %v %v", arr[0], hostConfig.Binds, config.Volumes)
 	}
 
 	// Two bind mounts.
 	arr, tryit = setupPlatformVolume([]string{`/hostTmp:/containerTmp`, `/hostVar:/containerVar`}, []string{os.Getenv("ProgramData") + `:c:\ContainerPD`, os.Getenv("TEMP") + `:c:\containerTmp`})
-	if _, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
+	if _, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
 		t.Fatalf("Error parsing volume flags, `%s and %s` did not mount-bind correctly. Received %v", arr[0], arr[1], hostConfig.Binds)
 	}
 
@@ -219,26 +279,26 @@ func TestParseWithVolumes(t *testing.T) {
 	arr, tryit = setupPlatformVolume(
 		[]string{`/hostTmp:/containerTmp:ro`, `/hostVar:/containerVar:rw`},
 		[]string{os.Getenv("TEMP") + `:c:\containerTmp:rw`, os.Getenv("ProgramData") + `:c:\ContainerPD:rw`})
-	if _, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
+	if _, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
 		t.Fatalf("Error parsing volume flags, `%s and %s` did not mount-bind correctly. Received %v", arr[0], arr[1], hostConfig.Binds)
 	}
 
 	// Similar to previous test but with alternate modes which are only supported by Linux
 	if runtime.GOOS != "windows" {
 		arr, tryit = setupPlatformVolume([]string{`/hostTmp:/containerTmp:ro,Z`, `/hostVar:/containerVar:rw,Z`}, []string{})
-		if _, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
+		if _, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
 			t.Fatalf("Error parsing volume flags, `%s and %s` did not mount-bind correctly. Received %v", arr[0], arr[1], hostConfig.Binds)
 		}
 
 		arr, tryit = setupPlatformVolume([]string{`/hostTmp:/containerTmp:Z`, `/hostVar:/containerVar:z`}, []string{})
-		if _, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
+		if _, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || compareRandomizedStrings(hostConfig.Binds[0], hostConfig.Binds[1], arr[0], arr[1]) != nil {
 			t.Fatalf("Error parsing volume flags, `%s and %s` did not mount-bind correctly. Received %v", arr[0], arr[1], hostConfig.Binds)
 		}
 	}
 
 	// One bind mount and one volume
 	arr, tryit = setupPlatformVolume([]string{`/hostTmp:/containerTmp`, `/containerVar`}, []string{os.Getenv("TEMP") + `:c:\containerTmp`, `c:\containerTmp`})
-	if config, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || len(hostConfig.Binds) > 1 || hostConfig.Binds[0] != arr[0] {
+	if config, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || len(hostConfig.Binds) > 1 || hostConfig.Binds[0] != arr[0] {
 		t.Fatalf("Error parsing volume flags, %s and %s should only one and only one bind mount %s. Received %s", arr[0], arr[1], arr[0], hostConfig.Binds)
 	} else if _, exists := config.Volumes[arr[1]]; !exists {
 		t.Fatalf("Error parsing volume flags %s and %s. %s is missing from volumes. Received %v", arr[0], arr[1], arr[1], config.Volumes)
@@ -247,7 +307,7 @@ func TestParseWithVolumes(t *testing.T) {
 	// Root to non-c: drive letter (Windows specific)
 	if runtime.GOOS == "windows" {
 		arr, tryit = setupPlatformVolume([]string{}, []string{os.Getenv("SystemDrive") + `\:d:`})
-		if config, hostConfig := mustParse(t, tryit); hostConfig.Binds == nil || len(hostConfig.Binds) > 1 || hostConfig.Binds[0] != arr[0] || len(config.Volumes) != 0 {
+		if config, hostConfig, _ := mustParse(t, tryit); hostConfig.Binds == nil || len(hostConfig.Binds) > 1 || hostConfig.Binds[0] != arr[0] || len(config.Volumes) != 0 {
 			t.Fatalf("Error parsing %s. Should have a single bind mount and no volumes", arr[0])
 		}
 	}
@@ -280,7 +340,7 @@ func compareRandomizedStrings(a, b, c, d string) error {
 	if a == d && b == c {
 		return nil
 	}
-	return errors.Errorf("strings don't match")
+	return errors.New("strings don't match")
 }
 
 // Simple parse with MacAddress validation
@@ -290,8 +350,14 @@ func TestParseWithMacAddress(t *testing.T) {
 	if _, _, _, err := parseRun([]string{invalidMacAddress, "img", "cmd"}); err != nil && err.Error() != "invalidMacAddress is not a valid mac address" {
 		t.Fatalf("Expected an error with %v mac-address, got %v", invalidMacAddress, err)
 	}
-	if config, _ := mustParse(t, validMacAddress); config.MacAddress != "92:d0:c6:0a:29:33" {
-		t.Fatalf("Expected the config to have '92:d0:c6:0a:29:33' as MacAddress, got '%v'", config.MacAddress)
+	config, hostConfig, nwConfig := mustParse(t, validMacAddress)
+	if config.MacAddress != "92:d0:c6:0a:29:33" { //nolint:staticcheck // ignore SA1019: field is deprecated, but still used on API < v1.44.
+		t.Fatalf("Expected the config to have '92:d0:c6:0a:29:33' as container-wide MacAddress, got '%v'",
+			config.MacAddress) //nolint:staticcheck // ignore SA1019: field is deprecated, but still used on API < v1.44.
+	}
+	defaultNw := hostConfig.NetworkMode.NetworkName()
+	if nwConfig.EndpointsConfig[defaultNw].MacAddress != "92:d0:c6:0a:29:33" {
+		t.Fatalf("Expected the default endpoint to have the MacAddress '92:d0:c6:0a:29:33' set, got '%v'", nwConfig.EndpointsConfig[defaultNw].MacAddress)
 	}
 }
 
@@ -301,7 +367,7 @@ func TestRunFlagsParseWithMemory(t *testing.T) {
 	err := flags.Parse(args)
 	assert.ErrorContains(t, err, `invalid argument "invalid" for "-m, --memory" flag`)
 
-	_, hostconfig := mustParse(t, "--memory=1G")
+	_, hostconfig, _ := mustParse(t, "--memory=1G")
 	assert.Check(t, is.Equal(int64(1073741824), hostconfig.Memory))
 }
 
@@ -311,10 +377,10 @@ func TestParseWithMemorySwap(t *testing.T) {
 	err := flags.Parse(args)
 	assert.ErrorContains(t, err, `invalid argument "invalid" for "--memory-swap" flag`)
 
-	_, hostconfig := mustParse(t, "--memory-swap=1G")
+	_, hostconfig, _ := mustParse(t, "--memory-swap=1G")
 	assert.Check(t, is.Equal(int64(1073741824), hostconfig.MemorySwap))
 
-	_, hostconfig = mustParse(t, "--memory-swap=-1")
+	_, hostconfig, _ = mustParse(t, "--memory-swap=-1")
 	assert.Check(t, is.Equal(int64(-1), hostconfig.MemorySwap))
 }
 
@@ -329,14 +395,14 @@ func TestParseHostname(t *testing.T) {
 	hostnameWithDomain := "--hostname=hostname.domainname"
 	hostnameWithDomainTld := "--hostname=hostname.domainname.tld"
 	for hostname, expectedHostname := range validHostnames {
-		if config, _ := mustParse(t, fmt.Sprintf("--hostname=%s", hostname)); config.Hostname != expectedHostname {
+		if config, _, _ := mustParse(t, "--hostname="+hostname); config.Hostname != expectedHostname {
 			t.Fatalf("Expected the config to have 'hostname' as %q, got %q", expectedHostname, config.Hostname)
 		}
 	}
-	if config, _ := mustParse(t, hostnameWithDomain); config.Hostname != "hostname.domainname" || config.Domainname != "" {
+	if config, _, _ := mustParse(t, hostnameWithDomain); config.Hostname != "hostname.domainname" || config.Domainname != "" {
 		t.Fatalf("Expected the config to have 'hostname' as hostname.domainname, got %q", config.Hostname)
 	}
-	if config, _ := mustParse(t, hostnameWithDomainTld); config.Hostname != "hostname.domainname.tld" || config.Domainname != "" {
+	if config, _, _ := mustParse(t, hostnameWithDomainTld); config.Hostname != "hostname.domainname.tld" || config.Domainname != "" {
 		t.Fatalf("Expected the config to have 'hostname' as hostname.domainname.tld, got %q", config.Hostname)
 	}
 }
@@ -350,14 +416,14 @@ func TestParseHostnameDomainname(t *testing.T) {
 		"domainname-63-bytes-long-should-be-valid-and-without-any-errors": "domainname-63-bytes-long-should-be-valid-and-without-any-errors",
 	}
 	for domainname, expectedDomainname := range validDomainnames {
-		if config, _ := mustParse(t, "--domainname="+domainname); config.Domainname != expectedDomainname {
+		if config, _, _ := mustParse(t, "--domainname="+domainname); config.Domainname != expectedDomainname {
 			t.Fatalf("Expected the config to have 'domainname' as %q, got %q", expectedDomainname, config.Domainname)
 		}
 	}
-	if config, _ := mustParse(t, "--hostname=some.prefix --domainname=domainname"); config.Hostname != "some.prefix" || config.Domainname != "domainname" {
+	if config, _, _ := mustParse(t, "--hostname=some.prefix --domainname=domainname"); config.Hostname != "some.prefix" || config.Domainname != "domainname" {
 		t.Fatalf("Expected the config to have 'hostname' as 'some.prefix' and 'domainname' as 'domainname', got %q and %q", config.Hostname, config.Domainname)
 	}
-	if config, _ := mustParse(t, "--hostname=another-prefix --domainname=domainname.tld"); config.Hostname != "another-prefix" || config.Domainname != "domainname.tld" {
+	if config, _, _ := mustParse(t, "--hostname=another-prefix --domainname=domainname.tld"); config.Hostname != "another-prefix" || config.Domainname != "domainname.tld" {
 		t.Fatalf("Expected the config to have 'hostname' as 'another-prefix' and 'domainname' as 'domainname.tld', got %q and %q", config.Hostname, config.Domainname)
 	}
 }
@@ -366,8 +432,8 @@ func TestParseWithExpose(t *testing.T) {
 	invalids := map[string]string{
 		":":                   "invalid port format for --expose: :",
 		"8080:9090":           "invalid port format for --expose: 8080:9090",
-		"/tcp":                "invalid range format for --expose: /tcp, error: Empty string specified for ports.",
-		"/udp":                "invalid range format for --expose: /udp, error: Empty string specified for ports.",
+		"/tcp":                "invalid range format for --expose: /tcp, error: empty string specified for ports",
+		"/udp":                "invalid range format for --expose: /udp, error: empty string specified for ports",
 		"NaN/tcp":             `invalid range format for --expose: NaN/tcp, error: strconv.ParseUint: parsing "NaN": invalid syntax`,
 		"NaN-NaN/tcp":         `invalid range format for --expose: NaN-NaN/tcp, error: strconv.ParseUint: parsing "NaN": invalid syntax`,
 		"8080-NaN/tcp":        `invalid range format for --expose: 8080-NaN/tcp, error: strconv.ParseUint: parsing "NaN": invalid syntax`,
@@ -687,7 +753,7 @@ func TestParseNetworkConfig(t *testing.T) {
 			}
 
 			assert.NilError(t, err)
-			assert.DeepEqual(t, config.MacAddress, tc.expectedCfg.MacAddress)
+			assert.DeepEqual(t, config.MacAddress, tc.expectedCfg.MacAddress) //nolint:staticcheck // ignore SA1019: field is deprecated, but still used on API < v1.44.
 			assert.DeepEqual(t, hConfig.NetworkMode, tc.expectedHostCfg.NetworkMode)
 			assert.DeepEqual(t, nwConfig.EndpointsConfig, tc.expected)
 		})
@@ -796,7 +862,6 @@ func TestParseRestartPolicy(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.input, func(t *testing.T) {
 			_, hostConfig, _, err := parseRun([]string{"--restart=" + tc.input, "img", "cmd"})
 			if tc.expectedErr != "" {
@@ -811,11 +876,9 @@ func TestParseRestartPolicy(t *testing.T) {
 }
 
 func TestParseRestartPolicyAutoRemove(t *testing.T) {
-	expected := "Conflicting options: --restart and --rm"
 	_, _, _, err := parseRun([]string{"--rm", "--restart=always", "img", "cmd"}) //nolint:dogsled
-	if err == nil || err.Error() != expected {
-		t.Fatalf("Expected error %v, but got none", expected)
-	}
+	const expected = "conflicting options: cannot specify both --restart and --rm"
+	assert.Check(t, is.Error(err, expected))
 }
 
 func TestParseHealth(t *testing.T) {
@@ -915,7 +978,7 @@ func TestParseEnvfileVariablesWithBOMUnicode(t *testing.T) {
 	}
 
 	// UTF16 with BOM
-	e := "contains invalid utf8 bytes at line"
+	e := "invalid utf8 bytes at line"
 	if _, _, _, err := parseRun([]string{"--env-file=testdata/utf16.env", "img", "cmd"}); err == nil || !strings.Contains(err.Error(), e) {
 		t.Fatalf("Expected an error with message '%s', got %v", e, err)
 	}
@@ -953,12 +1016,8 @@ func TestParseLabelfileVariables(t *testing.T) {
 
 func TestParseEntryPoint(t *testing.T) {
 	config, _, _, err := parseRun([]string{"--entrypoint=anything", "cmd", "img"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(config.Entrypoint) != 1 && config.Entrypoint[0] != "anything" {
-		t.Fatalf("Expected entrypoint 'anything', got %v", config.Entrypoint)
-	}
+	assert.NilError(t, err)
+	assert.Check(t, is.DeepEqual([]string(config.Entrypoint), []string{"anything"}))
 }
 
 func TestValidateDevice(t *testing.T) {
@@ -1005,10 +1064,8 @@ func TestValidateDevice(t *testing.T) {
 	for path, expectedError := range invalid {
 		if _, err := validateDevice(path, runtime.GOOS); err == nil {
 			t.Fatalf("ValidateDevice(`%q`) should have failed validation", path)
-		} else {
-			if err.Error() != expectedError {
-				t.Fatalf("ValidateDevice(`%q`) error should contain %q, got %q", path, expectedError, err.Error())
-			}
+		} else if err.Error() != expectedError {
+			t.Fatalf("ValidateDevice(`%q`) error should contain %q, got %q", path, expectedError, err.Error())
 		}
 	}
 }

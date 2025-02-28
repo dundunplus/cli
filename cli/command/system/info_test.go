@@ -43,7 +43,7 @@ var sampleInfoNoSwarm = system.Info{
 		Volume:        []string{"local"},
 		Network:       []string{"bridge", "host", "macvlan", "null", "overlay"},
 		Authorization: nil,
-		Log:           []string{"awslogs", "fluentd", "gcplogs", "gelf", "journald", "json-file", "logentries", "splunk", "syslog"},
+		Log:           []string{"awslogs", "fluentd", "gcplogs", "gelf", "journald", "json-file", "splunk", "syslog"},
 	},
 	MemoryLimit:        true,
 	SwapLimit:          true,
@@ -53,8 +53,6 @@ var sampleInfoNoSwarm = system.Info{
 	CPUShares:          true,
 	CPUSet:             true,
 	IPv4Forwarding:     true,
-	BridgeNfIptables:   true,
-	BridgeNfIP6tables:  true,
 	Debug:              true,
 	NFd:                33,
 	OomKillDisable:     true,
@@ -70,8 +68,6 @@ var sampleInfoNoSwarm = system.Info{
 	Architecture:       "x86_64",
 	IndexServerAddress: "https://index.docker.io/v1/",
 	RegistryConfig: &registrytypes.ServiceConfig{
-		AllowNondistributableArtifactsCIDRs:     nil,
-		AllowNondistributableArtifactsHostnames: nil,
 		InsecureRegistryCIDRs: []*registrytypes.NetIPNet{
 			{
 				IP:   net.ParseIP("127.0.0.0"),
@@ -98,10 +94,12 @@ var sampleInfoNoSwarm = system.Info{
 	Labels:            []string{"provider=digitalocean"},
 	ExperimentalBuild: false,
 	ServerVersion:     "17.06.1-ce",
-	Runtimes: map[string]system.Runtime{
+	Runtimes: map[string]system.RuntimeWithStatus{
 		"runc": {
-			Path: "docker-runc",
-			Args: nil,
+			Runtime: system.Runtime{
+				Path: "docker-runc",
+				Args: nil,
+			},
 		},
 	},
 	DefaultRuntime:     "runc",
@@ -240,8 +238,6 @@ func TestPrettyPrintInfo(t *testing.T) {
 	infoWithWarningsLinux.CPUShares = false
 	infoWithWarningsLinux.CPUSet = false
 	infoWithWarningsLinux.IPv4Forwarding = false
-	infoWithWarningsLinux.BridgeNfIptables = false
-	infoWithWarningsLinux.BridgeNfIP6tables = false
 
 	sampleInfoDaemonWarnings := sampleInfoNoSwarm
 	sampleInfoDaemonWarnings.Warnings = []string{
@@ -253,8 +249,6 @@ func TestPrettyPrintInfo(t *testing.T) {
 		"WARNING: No cpu shares support",
 		"WARNING: No cpuset support",
 		"WARNING: IPv4 forwarding is disabled",
-		"WARNING: bridge-nf-call-iptables is disabled",
-		"WARNING: bridge-nf-call-ip6tables is disabled",
 	}
 
 	sampleInfoBadSecurity := sampleInfoNoSwarm
@@ -267,7 +261,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 
 	for _, tc := range []struct {
 		doc        string
-		dockerInfo info
+		dockerInfo dockerInfo
 
 		prettyGolden   string
 		warningsGolden string
@@ -276,7 +270,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 	}{
 		{
 			doc: "info without swarm",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info: &sampleInfoNoSwarm,
 				ClientInfo: &clientInfo{
 					clientVersion: clientVersion{
@@ -292,7 +286,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 		},
 		{
 			doc: "info with plugins",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info: &sampleInfoNoSwarm,
 				ClientInfo: &clientInfo{
 					clientVersion: clientVersion{Context: "default"},
@@ -305,7 +299,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 		},
 		{
 			doc: "info with nil labels",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info:       &sampleInfoLabelsNil,
 				ClientInfo: &clientInfo{clientVersion: clientVersion{Context: "default"}},
 			},
@@ -313,7 +307,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 		},
 		{
 			doc: "info with empty labels",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info:       &sampleInfoLabelsEmpty,
 				ClientInfo: &clientInfo{clientVersion: clientVersion{Context: "default"}},
 			},
@@ -321,7 +315,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 		},
 		{
 			doc: "info with swarm",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info: &infoWithSwarm,
 				ClientInfo: &clientInfo{
 					clientVersion: clientVersion{Context: "default"},
@@ -332,25 +326,8 @@ func TestPrettyPrintInfo(t *testing.T) {
 			jsonGolden:   "docker-info-with-swarm",
 		},
 		{
-			doc: "info with legacy warnings",
-			dockerInfo: info{
-				Info: &infoWithWarningsLinux,
-				ClientInfo: &clientInfo{
-					clientVersion: clientVersion{
-						Platform: &platformInfo{Name: "Docker Engine - Community"},
-						Version:  "24.0.0",
-						Context:  "default",
-					},
-					Debug: true,
-				},
-			},
-			prettyGolden:   "docker-info-no-swarm",
-			warningsGolden: "docker-info-warnings",
-			jsonGolden:     "docker-info-legacy-warnings",
-		},
-		{
 			doc: "info with daemon warnings",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info: &sampleInfoDaemonWarnings,
 				ClientInfo: &clientInfo{
 					clientVersion: clientVersion{
@@ -367,7 +344,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 		},
 		{
 			doc: "errors for both",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				ServerErrors: []string{"a server error occurred"},
 				ClientErrors: []string{"a client error occurred"},
 			},
@@ -378,7 +355,7 @@ func TestPrettyPrintInfo(t *testing.T) {
 		},
 		{
 			doc: "bad security info",
-			dockerInfo: info{
+			dockerInfo: dockerInfo{
 				Info:         &sampleInfoBadSecurity,
 				ServerErrors: []string{"a server error occurred"},
 				ClientInfo:   &clientInfo{Debug: false},
@@ -389,7 +366,6 @@ func TestPrettyPrintInfo(t *testing.T) {
 			expectedError:  "errors pretty printing info",
 		},
 	} {
-		tc := tc
 		t.Run(tc.doc, func(t *testing.T) {
 			cli := test.NewFakeCli(&fakeClient{})
 			err := prettyPrintInfo(cli, tc.dockerInfo)
@@ -424,7 +400,7 @@ func BenchmarkPrettyPrintInfo(b *testing.B) {
 	infoWithSwarm := sampleInfoNoSwarm
 	infoWithSwarm.Swarm = sampleSwarmInfo
 
-	dockerInfo := info{
+	info := dockerInfo{
 		Info: &infoWithSwarm,
 		ClientInfo: &clientInfo{
 			clientVersion: clientVersion{
@@ -439,7 +415,7 @@ func BenchmarkPrettyPrintInfo(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = prettyPrintInfo(cli, dockerInfo)
+		_ = prettyPrintInfo(cli, info)
 		cli.ResetOutputBuffers()
 	}
 }
@@ -459,28 +435,28 @@ func TestFormatInfo(t *testing.T) {
 		{
 			doc:           "syntax",
 			template:      "{{}",
-			expectedError: `Status: template parsing error: template: :1: unexpected "}" in command, Code: 64`,
+			expectedError: `template parsing error: template: :1: unexpected "}" in command`,
 		},
 		{
 			doc:           "syntax",
 			template:      "{{.badString}}",
-			expectedError: `template: :1:2: executing "" at <.badString>: can't evaluate field badString in type system.info`,
+			expectedError: `template: :1:2: executing "" at <.badString>: can't evaluate field badString in type system.dockerInfo`,
 		},
 	} {
-		tc := tc
 		t.Run(tc.doc, func(t *testing.T) {
 			cli := test.NewFakeCli(&fakeClient{})
-			info := info{
+			info := dockerInfo{
 				Info:       &sampleInfoNoSwarm,
 				ClientInfo: &clientInfo{Debug: true},
 			}
 			err := formatInfo(cli.Out(), info, tc.template)
-			if tc.expectedOut != "" {
+			switch {
+			case tc.expectedOut != "":
 				assert.NilError(t, err)
 				assert.Equal(t, cli.OutBuffer().String(), tc.expectedOut)
-			} else if tc.expectedError != "" {
+			case tc.expectedError != "":
 				assert.Error(t, err, tc.expectedError)
-			} else {
+			default:
 				t.Fatal("test expected to neither pass nor fail")
 			}
 		})
@@ -530,9 +506,8 @@ func TestNeedsServerInfo(t *testing.T) {
 		},
 	}
 
-	inf := info{ClientInfo: &clientInfo{}}
+	inf := dockerInfo{ClientInfo: &clientInfo{}}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.doc, func(t *testing.T) {
 			assert.Equal(t, needsServerInfo(tc.template, inf), tc.expected)
 		})
