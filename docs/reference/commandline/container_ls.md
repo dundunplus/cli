@@ -405,6 +405,7 @@ Valid placeholders for the Go template are listed below:
 | `.Ports`        | Exposed ports.                                                                                  |
 | `.State`        | Container status (for example; "created", "running", "exited").                                 |
 | `.Status`       | Container status with details about duration and health-status.                                 |
+| `.HealthStatus` | Container health status ("starting", "healthy", "unhealthy"; empty when unavailable).           |
 | `.Size`         | Container disk size.                                                                            |
 | `.Names`        | Container names.                                                                                |
 | `.Labels`       | All labels assigned to the container.                                                           |
