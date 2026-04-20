@@ -50,7 +50,6 @@ docker-run - Create and run a new container from an image
 [**--ip6**[=*IPv6-ADDRESS*]]
 [**--ipc**[=*IPC*]]
 [**--isolation**[=*default*]]
-[**--kernel-memory**[=*KERNEL-MEMORY*]]
 [**-l**|**--label**[=*[]*]]
 [**--label-file**[=*[]*]]
 [**--link**[=*[]*]]
@@ -409,15 +408,6 @@ is `hyperv`. Linux only supports `default`.
 
 **-l**, **--label** *key*=*value*
    Set metadata on the container (for example, **--label com.example.key=value**).
-
-**--kernel-memory**=*number*[*S*]
-   Kernel memory limit; *S* is an optional suffix which can be one of **b**, **k**, **m**, or **g**.
-
-   Constrains the kernel memory available to a container. If a limit of 0
-   is specified (not using **--kernel-memory**), the container's kernel memory
-   is not limited. If you specify a limit, it may be rounded up to a multiple
-   of the operating system's page size and the value can be very large,
-   millions of trillions.
 
 **--label-file**=[]
    Read in a line delimited file of labels

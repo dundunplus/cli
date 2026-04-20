@@ -226,7 +226,6 @@ complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l ip -d 'IPv4 
 complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l ip6 -d 'IPv6 address (e.g., 2001:db8::33)'
 complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l ipc -d 'IPC mode to use'
 complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l isolation -d 'Container isolation technology'
-complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l kernel-memory -d 'Kernel memory limit'
 complete -c docker -A -f -n '__fish_seen_subcommand_from create' -s l -l label -d 'Set meta data on a container'
 complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l label-file -d 'Read in a line delimited file of labels'
 complete -c docker -A -f -n '__fish_seen_subcommand_from create' -l link -d 'Add link to another container'
