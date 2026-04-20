@@ -177,9 +177,8 @@ func TestGetPluginDirs(t *testing.T) {
 	pluginDirs := getPluginDirs(cli.ConfigFile())
 	assert.Equal(t, strings.Join(expected, ":"), strings.Join(pluginDirs, ":"))
 
-	extras := []string{
-		"foo", "bar", "baz",
-	}
+	extras := make([]string, 0, 3+len(expected))
+	extras = append(extras, "foo", "bar", "baz")
 	expected = append(extras, expected...)
 	cli.SetConfigFile(&configfile.ConfigFile{
 		CLIPluginsExtraDirs: extras,
