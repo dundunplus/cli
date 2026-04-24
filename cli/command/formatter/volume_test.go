@@ -48,9 +48,7 @@ func TestVolumeContext(t *testing.T) {
 	for _, c := range cases {
 		ctx = c.volumeCtx
 		v := c.call()
-		if strings.Contains(v, ",") {
-			test.CompareMultipleValues(t, v, c.expValue)
-		} else if v != c.expValue {
+		if v != c.expValue {
 			t.Fatalf("Expected %s, was %s\n", c.expValue, v)
 		}
 	}
