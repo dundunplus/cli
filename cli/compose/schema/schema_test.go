@@ -117,20 +117,21 @@ func TestValidatePorts(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		config := dict{
-			"version": "3.0",
-			"services": dict{
-				"foo": dict{
-					"image": "busybox",
-					"ports": tc.ports,
+		t.Run(fmt.Sprint(tc.ports), func(t *testing.T) {
+			config := dict{
+				"services": dict{
+					"foo": dict{
+						"image": "busybox",
+						"ports": tc.ports,
+					},
 				},
-			},
-		}
-		if tc.hasError {
-			assert.ErrorContains(t, Validate(config, "3"), "services.foo.ports.0 Does not match format 'ports'")
-		} else {
-			assert.NilError(t, Validate(config, "3"))
-		}
+			}
+			if tc.hasError {
+				assert.ErrorContains(t, Validate(config, "3"), "services.foo.ports.0 Does not match format 'ports'")
+			} else {
+				assert.NilError(t, Validate(config, "3"))
+			}
+		})
 	}
 }
 
