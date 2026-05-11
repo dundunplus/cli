@@ -830,13 +830,6 @@ func TestParseRestartPolicy(t *testing.T) {
 			},
 		},
 		{
-			input: "always:1",
-			expected: container.RestartPolicy{
-				Name:              container.RestartPolicyAlways,
-				MaximumRetryCount: 1,
-			},
-		},
-		{
 			input:       "always:2:3",
 			expectedErr: "invalid restart policy format: maximum retry count must be an integer",
 		},
@@ -860,6 +853,16 @@ func TestParseRestartPolicy(t *testing.T) {
 		{
 			input:       "unless-stopped:invalid",
 			expectedErr: "invalid restart policy format: maximum retry count must be an integer",
+		},
+
+		// Unknown / invalid combinations: validation is handled by the daemon>
+		{
+			input:    "anything:123",
+			expected: container.RestartPolicy{Name: "anything", MaximumRetryCount: 123},
+		},
+		{
+			input:    "negative:-123",
+			expected: container.RestartPolicy{Name: "negative", MaximumRetryCount: -123},
 		},
 	}
 	for _, tc := range tests {

@@ -85,8 +85,7 @@ func Service(
 		return swarm.ServiceSpec{}, err
 	}
 
-	restartPolicy, err := convertRestartPolicy(
-		service.Restart, service.Deploy.RestartPolicy)
+	restartPolicy, err := convertRestartPolicy(service.Restart, service.Deploy.RestartPolicy)
 	if err != nil {
 		return swarm.ServiceSpec{}, err
 	}
@@ -472,37 +471,58 @@ func convertHealthcheck(healthcheck *composetypes.HealthCheckConfig) (*container
 	}, nil
 }
 
-func convertRestartPolicy(restart string, source *composetypes.RestartPolicy) (*swarm.RestartPolicy, error) {
-	// TODO: log if restart is being ignored
-	if source == nil {
-		policy, err := opts.ParseRestartPolicy(restart)
-		if err != nil {
-			return nil, err
-		}
-		switch {
-		case policy.IsNone():
-			return nil, nil
-		case policy.IsAlways(), policy.IsUnlessStopped():
-			return &swarm.RestartPolicy{
-				Condition: swarm.RestartPolicyConditionAny,
-			}, nil
-		case policy.IsOnFailure():
-			attempts := uint64(policy.MaximumRetryCount)
-			return &swarm.RestartPolicy{
-				Condition:   swarm.RestartPolicyConditionOnFailure,
-				MaxAttempts: &attempts,
-			}, nil
-		default:
-			return nil, fmt.Errorf("unknown restart policy: %s", restart)
-		}
+// convertRestartPolicy converts the service's restart-policy. It prefers
+// service.deploy.restart_policy, but falls back to parsing the legacy
+// service.restart if service.deploy.restart_policy is not set.
+func convertRestartPolicy(restart string, restartPolicy *composetypes.RestartPolicy) (*swarm.RestartPolicy, error) {
+	// Use service.deploy.restart_policy, if set.
+	if restartPolicy != nil {
+		// TODO: log or error if both "service.restart" and "service.deploy.restartpolicy" are set.
+		return &swarm.RestartPolicy{
+			Condition:   swarm.RestartPolicyCondition(restartPolicy.Condition),
+			Delay:       composetypes.ConvertDurationPtr(restartPolicy.Delay),
+			MaxAttempts: restartPolicy.MaxAttempts,
+			Window:      composetypes.ConvertDurationPtr(restartPolicy.Window),
+		}, nil
+	}
+	if restart == "" {
+		return nil, nil
 	}
 
-	return &swarm.RestartPolicy{
-		Condition:   swarm.RestartPolicyCondition(source.Condition),
-		Delay:       composetypes.ConvertDurationPtr(source.Delay),
-		MaxAttempts: source.MaxAttempts,
-		Window:      composetypes.ConvertDurationPtr(source.Window),
-	}, nil
+	// Fall back to the legacy service.restart restart-policy.
+	policy, err := opts.ParseRestartPolicy(restart)
+	if err != nil {
+		return nil, err
+	}
+	if policy.MaximumRetryCount < 0 {
+		return nil, errors.New("invalid restart policy: maximum retry count cannot be negative")
+	}
+	uint64Ptr := func(i int) *uint64 {
+		if i <= 0 {
+			return nil
+		}
+		p := uint64(i)
+		return &p
+	}
+
+	switch policy.Name {
+	case container.RestartPolicyDisabled, "":
+		return nil, nil
+	case container.RestartPolicyAlways, container.RestartPolicyUnlessStopped:
+		return &swarm.RestartPolicy{
+			Condition:   swarm.RestartPolicyConditionAny,
+			MaxAttempts: uint64Ptr(policy.MaximumRetryCount),
+		}, nil
+	case container.RestartPolicyOnFailure:
+		return &swarm.RestartPolicy{
+			Condition:   swarm.RestartPolicyConditionOnFailure,
+			MaxAttempts: uint64Ptr(policy.MaximumRetryCount),
+		}, nil
+	default:
+		return nil, fmt.Errorf("invalid restart policy: unknown policy '%s' (must be one of '%s', '%s', '%s', or '%s')",
+			policy.Name, container.RestartPolicyDisabled, container.RestartPolicyAlways, container.RestartPolicyOnFailure, container.RestartPolicyUnlessStopped,
+		)
+	}
 }
 
 func convertUpdateConfig(source *composetypes.UpdateConfig) *swarm.UpdateConfig {
