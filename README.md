@@ -74,7 +74,7 @@ make help
 Start an interactive development environment:
 
 ```shell
-make -f docker.Makefile shell
+make shell
 ```
 
 ## Legal
